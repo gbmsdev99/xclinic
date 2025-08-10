@@ -42,12 +42,24 @@ export const updateQueueSummary = async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    // Get today's visit counts
-    const { data: visits, error: visitsError } = await supabase
-      .from('visits')
-      .select('visit_status, payment_status, payment_amount')
-      .gte('created_at', `${today}T00:00:00.000Z`)
-      .lt('created_at', `${today}T23:59:59.999Z`);
+    // Get today's visit counts - handle both real and mock data
+    let visits: any[] = [];
+    let visitsError = null;
+    
+    if (isDemo) {
+      const allVisits = JSON.parse(localStorage.getItem('demo_visits') || '[]');
+      visits = allVisits.filter((visit: any) => 
+        visit.created_at.split('T')[0] === today
+      );
+    } else {
+      const result = await supabase
+        .from('visits')
+        .select('visit_status, payment_status, payment_amount')
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .lt('created_at', `${today}T23:59:59.999Z`);
+      visits = result.data || [];
+      visitsError = result.error;
+    }
 
     if (visitsError) throw visitsError;
 
@@ -59,13 +71,13 @@ export const updateQueueSummary = async () => {
     const estimatedWaitTime = totalWaiting * 15;
 
     // Get current token
-    const currentVisit = visits?.find(v => v.visit_status === 'in_consultation');
-    const currentToken = currentVisit ? visits.find(v => v.id === currentVisit.id)?.token_number : null;
+    const currentVisit = visits?.find((v: any) => v.visit_status === 'in_consultation');
+    const currentToken = currentVisit?.token_number || null;
 
-    // Update queue summary
-    const { error: updateError } = await supabase
-      .from('queue_summary')
-      .upsert({
+    // Update queue summary - handle both real and mock data
+    if (isDemo) {
+      // Update mock data
+      const summaryData = {
         date: today,
         total_appointments: totalAppointments,
         total_waiting: totalWaiting,
@@ -75,11 +87,29 @@ export const updateQueueSummary = async () => {
         estimated_wait_time: estimatedWaitTime,
         total_revenue: totalRevenue,
         updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'date'
-      });
+      };
+      
+      // Store in localStorage for demo
+      localStorage.setItem('demo_queue_summary', JSON.stringify(summaryData));
+    } else {
+      const { error: updateError } = await supabase
+        .from('queue_summary')
+        .upsert({
+          date: today,
+          total_appointments: totalAppointments,
+          total_waiting: totalWaiting,
+          total_completed: totalCompleted,
+          total_cancelled: totalCancelled,
+          current_token: currentToken,
+          estimated_wait_time: estimatedWaitTime,
+          total_revenue: totalRevenue,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'date'
+        });
 
-    if (updateError) throw updateError;
+      if (updateError) throw updateError;
+    }
   } catch (error) {
     console.error('Error updating queue summary:', error);
   }

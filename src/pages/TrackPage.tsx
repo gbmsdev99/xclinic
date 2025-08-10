@@ -53,11 +53,29 @@ export const TrackPage: React.FC = () => {
   };
 
   const fetchVisit = async (visitUid: string) => {
-    const { data, error } = await supabase
-      .from('visits')
-      .select('*')
-      .eq('uid', visitUid)
-      .single();
+    // Check if we're using demo mode
+    const isDemo = import.meta.env.VITE_SUPABASE_URL === 'https://demo.supabase.co' || 
+                   !import.meta.env.VITE_SUPABASE_URL ||
+                   import.meta.env.VITE_SUPABASE_ANON_KEY === 'demo-key';
+    
+    let data = null;
+    let error = null;
+    
+    if (isDemo) {
+      const allVisits = JSON.parse(localStorage.getItem('demo_visits') || '[]');
+      data = allVisits.find((visit: any) => visit.uid === visitUid);
+      if (!data) {
+        error = { code: 'PGRST116' };
+      }
+    } else {
+      const result = await supabase
+        .from('visits')
+        .select('*')
+        .eq('uid', visitUid)
+        .single();
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) {
       if (error.code === 'PGRST116') {
@@ -72,10 +90,40 @@ export const TrackPage: React.FC = () => {
   };
 
   const fetchQueueSummary = async () => {
-    const { data, error } = await supabase
-      .from('queue_summary')
-      .select('*')
-      .single();
+    // Check if we're using demo mode
+    const isDemo = import.meta.env.VITE_SUPABASE_URL === 'https://demo.supabase.co' || 
+                   !import.meta.env.VITE_SUPABASE_URL ||
+                   import.meta.env.VITE_SUPABASE_ANON_KEY === 'demo-key';
+    
+    let data = null;
+    let error = null;
+    
+    if (isDemo) {
+      const storedSummary = localStorage.getItem('demo_queue_summary');
+      if (storedSummary) {
+        data = JSON.parse(storedSummary);
+      } else {
+        data = {
+          id: '1',
+          date: new Date().toISOString().split('T')[0],
+          total_appointments: 0,
+          total_waiting: 0,
+          total_completed: 0,
+          total_cancelled: 0,
+          estimated_wait_time: 0,
+          average_consultation_time: 15,
+          total_revenue: 0,
+          updated_at: new Date().toISOString()
+        };
+      }
+    } else {
+      const result = await supabase
+        .from('queue_summary')
+        .select('*')
+        .single();
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) throw error;
     setQueueSummary(data);

@@ -62,15 +62,69 @@ export const HomePage: React.FC = () => {
   };
 
   const fetchQueueSummary = async () => {
-    const today = new Date().toISOString().split('T')[0];
-    const { data, error } = await supabase
-      .from('queue_summary')
-      .select('*')
-      .eq('date', today)
-      .single();
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Check if we're using demo mode
+      const isDemo = import.meta.env.VITE_SUPABASE_URL === 'https://demo.supabase.co' || 
+                     !import.meta.env.VITE_SUPABASE_URL ||
+                     import.meta.env.VITE_SUPABASE_ANON_KEY === 'demo-key';
+      
+      let data = null;
+      let error = null;
+      
+      if (isDemo) {
+        // Get from localStorage for demo
+        const storedSummary = localStorage.getItem('demo_queue_summary');
+        if (storedSummary) {
+          data = JSON.parse(storedSummary);
+        } else {
+          // Create default summary
+          data = {
+            id: '1',
+            date: today,
+            total_appointments: 0,
+            total_waiting: 0,
+            total_completed: 0,
+            total_cancelled: 0,
+            estimated_wait_time: 0,
+            average_consultation_time: 15,
+            total_revenue: 0,
+            updated_at: new Date().toISOString()
+          };
+          localStorage.setItem('demo_queue_summary', JSON.stringify(data));
+        }
+      } else {
+        const result = await supabase
+          .from('queue_summary')
+          .select('*')
+          .eq('date', today)
+          .single();
+        data = result.data;
+        error = result.error;
+      }
 
-    if (error) {
-      console.log('Queue summary not found, creating default');
+      if (error && !isDemo) {
+        console.log('Queue summary not found, creating default');
+        setQueueSummary({
+          id: '',
+          date: today,
+          total_appointments: 0,
+          total_waiting: 0,
+          total_completed: 0,
+          total_cancelled: 0,
+          estimated_wait_time: 0,
+          average_consultation_time: 15,
+          total_revenue: 0,
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        setQueueSummary(data);
+      }
+    } catch (error) {
+      console.error('Error fetching queue summary:', error);
+      // Set default values on error
+      const today = new Date().toISOString().split('T')[0];
       setQueueSummary({
         id: '',
         date: today,
@@ -83,8 +137,6 @@ export const HomePage: React.FC = () => {
         total_revenue: 0,
         updated_at: new Date().toISOString()
       });
-    } else {
-      setQueueSummary(data);
     }
   };
 

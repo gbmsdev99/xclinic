@@ -63,13 +63,32 @@ export const BookingPage: React.FC = () => {
     try {
       // Get next token number
       const today = new Date().toISOString().split('T')[0];
-      const { data: existingVisits, error: countError } = await supabase
-        .from('visits')
-        .select('token_number')
-        .gte('created_at', `${today}T00:00:00.000Z`)
-        .lt('created_at', `${today}T23:59:59.999Z`)
-        .order('token_number', { ascending: false })
-        .limit(1);
+      
+      // Check if we're using demo mode
+      const isDemo = import.meta.env.VITE_SUPABASE_URL === 'https://demo.supabase.co' || 
+                     !import.meta.env.VITE_SUPABASE_URL ||
+                     import.meta.env.VITE_SUPABASE_ANON_KEY === 'demo-key';
+      
+      let existingVisits: any[] = [];
+      let countError = null;
+      
+      if (isDemo) {
+        const allVisits = JSON.parse(localStorage.getItem('demo_visits') || '[]');
+        existingVisits = allVisits
+          .filter((visit: any) => visit.created_at.split('T')[0] === today)
+          .sort((a: any, b: any) => b.token_number - a.token_number)
+          .slice(0, 1);
+      } else {
+        const result = await supabase
+          .from('visits')
+          .select('token_number')
+          .gte('created_at', `${today}T00:00:00.000Z`)
+          .lt('created_at', `${today}T23:59:59.999Z`)
+          .order('token_number', { ascending: false })
+          .limit(1);
+        existingVisits = result.data || [];
+        countError = result.error;
+      }
 
       if (countError) throw countError;
 
@@ -79,12 +98,18 @@ export const BookingPage: React.FC = () => {
       const uid = generateUID(tokenNumber);
 
       // Get clinic settings for payment amount
-      const { data: settings } = await supabase
-        .from('clinic_settings')
-        .select('consultation_fee')
-        .single();
+      let consultationFee = 500;
+      
+      if (isDemo) {
+        consultationFee = 500; // Default for demo
+      } else {
+        const { data: settings } = await supabase
+          .from('clinic_settings')
+          .select('consultation_fee')
+          .single();
+        consultationFee = settings?.consultation_fee || 500;
+      }
 
-      const consultationFee = settings?.consultation_fee || 500;
 
       // Create visit record
       const visitData = {
@@ -111,11 +136,29 @@ export const BookingPage: React.FC = () => {
         estimated_time: `${tokenNumber * 15} minutes`,
       };
 
-      const { data: visit, error } = await supabase
-        .from('visits')
-        .insert(visitData)
-        .select()
-        .single();
+      let visit: any;
+      let error = null;
+      
+      if (isDemo) {
+        visit = {
+          ...visitData,
+          id: Math.random().toString(36).substr(2, 9),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const allVisits = JSON.parse(localStorage.getItem('demo_visits') || '[]');
+        allVisits.push(visit);
+        localStorage.setItem('demo_visits', JSON.stringify(allVisits));
+      } else {
+        const result = await supabase
+          .from('visits')
+          .insert(visitData)
+          .select()
+          .single();
+        visit = result.data;
+        error = result.error;
+      }
 
       if (error) throw error;
 
@@ -125,16 +168,30 @@ export const BookingPage: React.FC = () => {
       // If online payment, redirect to payment (simulated)
       if (formData.payment_method === 'online') {
         // Simulate payment success for demo
-        const { error: paymentError } = await supabase
-          .from('visits')
-          .update({ 
-            payment_status: 'paid',
-            payment_id: `pay_${Date.now()}`,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', visit.id);
+        if (isDemo) {
+          const allVisits = JSON.parse(localStorage.getItem('demo_visits') || '[]');
+          const visitIndex = allVisits.findIndex((v: any) => v.id === visit.id);
+          if (visitIndex >= 0) {
+            allVisits[visitIndex] = {
+              ...allVisits[visitIndex],
+              payment_status: 'paid',
+              payment_id: `pay_${Date.now()}`,
+              updated_at: new Date().toISOString()
+            };
+            localStorage.setItem('demo_visits', JSON.stringify(allVisits));
+          }
+        } else {
+          const { error: paymentError } = await supabase
+            .from('visits')
+            .update({ 
+              payment_status: 'paid',
+              payment_id: `pay_${Date.now()}`,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', visit.id);
 
-        if (paymentError) throw paymentError;
+          if (paymentError) throw paymentError;
+        }
       }
 
       toast.success('Booking confirmed successfully!');
