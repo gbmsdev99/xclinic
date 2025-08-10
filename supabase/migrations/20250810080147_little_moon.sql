@@ -1,30 +1,19 @@
 /*
-  # Complete X Clinic Database Schema
+  # Complete X Clinic Database Schema (Idempotent Version)
 
-  1. New Tables
-    - `clinic_settings` - Store clinic configuration and settings
-    - `visits` - All patient visits and bookings with complete workflow
-    - `prescriptions` - Digital prescriptions linked to visits
-    - `queue_summary` - Real-time queue statistics for homepage
-
-  2. Security
-    - Enable RLS on all tables
-    - Public read access for clinic settings and queue summary
-    - Public create access for new visits (patient bookings)
-    - Authenticated access for admin operations
-
-  3. Features
-    - Real-time queue management
-    - Payment tracking (online/clinic)
-    - Digital prescriptions
-    - Complete patient workflow
-    - Admin dashboard with analytics
+  Features:
+    - Safe CREATE / DROP so reruns don’t fail
+    - Real-time queue, prescriptions, patient workflow
+    - Full RLS policies
 */
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create clinic_settings table
+-- =====================================
+-- TABLES
+-- =====================================
+
 CREATE TABLE IF NOT EXISTS clinic_settings (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   clinic_name text NOT NULL DEFAULT 'X Clinic',
@@ -52,7 +41,6 @@ CREATE TABLE IF NOT EXISTS clinic_settings (
   updated_at timestamptz DEFAULT now()
 );
 
--- Create visits table
 CREATE TABLE IF NOT EXISTS visits (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   uid text UNIQUE NOT NULL,
@@ -97,7 +85,6 @@ CREATE TABLE IF NOT EXISTS visits (
   updated_at timestamptz DEFAULT now()
 );
 
--- Create prescriptions table
 CREATE TABLE IF NOT EXISTS prescriptions (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   visit_id uuid REFERENCES visits(id) ON DELETE CASCADE,
@@ -116,7 +103,6 @@ CREATE TABLE IF NOT EXISTS prescriptions (
   updated_at timestamptz DEFAULT now()
 );
 
--- Create queue_summary table
 CREATE TABLE IF NOT EXISTS queue_summary (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   date date DEFAULT CURRENT_DATE,
@@ -132,7 +118,9 @@ CREATE TABLE IF NOT EXISTS queue_summary (
   updated_at timestamptz DEFAULT now()
 );
 
--- Create indexes for better performance
+-- =====================================
+-- INDEXES
+-- =====================================
 CREATE INDEX IF NOT EXISTS idx_visits_uid ON visits(uid);
 CREATE INDEX IF NOT EXISTS idx_visits_token ON visits(token_number);
 CREATE INDEX IF NOT EXISTS idx_visits_status ON visits(visit_status);
@@ -143,31 +131,47 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_visit_id ON prescriptions(visit_id)
 CREATE INDEX IF NOT EXISTS idx_prescriptions_patient_uid ON prescriptions(patient_uid);
 CREATE INDEX IF NOT EXISTS idx_queue_summary_date ON queue_summary(date);
 
--- Enable Row Level Security
+-- =====================================
+-- RLS
+-- =====================================
 ALTER TABLE clinic_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE visits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prescriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE queue_summary ENABLE ROW LEVEL SECURITY;
 
--- Create RLS policies for clinic_settings
+-- Drop old policies before creating (avoids "already exists" error)
+DROP POLICY IF EXISTS "Anyone can read clinic settings" ON clinic_settings;
+DROP POLICY IF EXISTS "Authenticated users can update clinic settings" ON clinic_settings;
+
+DROP POLICY IF EXISTS "Anyone can read visits" ON visits;
+DROP POLICY IF EXISTS "Anyone can create visits" ON visits;
+DROP POLICY IF EXISTS "Authenticated users can update visits" ON visits;
+DROP POLICY IF EXISTS "Authenticated users can delete visits" ON visits;
+
+DROP POLICY IF EXISTS "Anyone can read prescriptions" ON prescriptions;
+DROP POLICY IF EXISTS "Authenticated users can manage prescriptions" ON prescriptions;
+
+DROP POLICY IF EXISTS "Anyone can read queue summary" ON queue_summary;
+DROP POLICY IF EXISTS "Authenticated users can update queue summary" ON queue_summary;
+
+-- Create new policies
 CREATE POLICY "Anyone can read clinic settings" ON clinic_settings FOR SELECT TO public USING (true);
 CREATE POLICY "Authenticated users can update clinic settings" ON clinic_settings FOR ALL TO authenticated USING (true);
 
--- Create RLS policies for visits
 CREATE POLICY "Anyone can read visits" ON visits FOR SELECT TO public USING (true);
 CREATE POLICY "Anyone can create visits" ON visits FOR INSERT TO public WITH CHECK (true);
 CREATE POLICY "Authenticated users can update visits" ON visits FOR UPDATE TO authenticated USING (true);
 CREATE POLICY "Authenticated users can delete visits" ON visits FOR DELETE TO authenticated USING (true);
 
--- Create RLS policies for prescriptions
 CREATE POLICY "Anyone can read prescriptions" ON prescriptions FOR SELECT TO public USING (true);
 CREATE POLICY "Authenticated users can manage prescriptions" ON prescriptions FOR ALL TO authenticated USING (true);
 
--- Create RLS policies for queue_summary
 CREATE POLICY "Anyone can read queue summary" ON queue_summary FOR SELECT TO public USING (true);
 CREATE POLICY "Authenticated users can update queue summary" ON queue_summary FOR ALL TO authenticated USING (true);
 
--- Create function to update queue summary
+-- =====================================
+-- FUNCTIONS & TRIGGERS
+-- =====================================
 CREATE OR REPLACE FUNCTION update_queue_summary()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -176,13 +180,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create trigger to update queue summary when visits change
 DROP TRIGGER IF EXISTS update_queue_summary_trigger ON visits;
 CREATE TRIGGER update_queue_summary_trigger
   AFTER INSERT OR UPDATE OR DELETE ON visits
   FOR EACH ROW EXECUTE FUNCTION update_queue_summary();
 
--- Insert default clinic settings
+-- =====================================
+-- DEFAULT DATA
+-- =====================================
 INSERT INTO clinic_settings (
   clinic_name,
   clinic_address,
@@ -215,9 +220,9 @@ INSERT INTO clinic_settings (
   15,
   50,
   '+91 98765 43210'
-) ON CONFLICT (id) DO NOTHING;
+)
+ON CONFLICT DO NOTHING;
 
--- Insert initial queue summary for today
 INSERT INTO queue_summary (
   date,
   total_appointments,
@@ -236,4 +241,5 @@ INSERT INTO queue_summary (
   0,
   15,
   0
-) ON CONFLICT DO NOTHING;
+)
+ON CONFLICT DO NOTHING;
